@@ -3,6 +3,8 @@ import requests
 import folium
 from streamlit_folium import st_folium
 from typing import Literal
+import openai
+import base64
 
 st.set_page_config(page_title="ハザードマップ表示", layout="wide", page_icon="🗾")
 st.title("🗾 ハザードマップ表示アプリ")
@@ -47,6 +49,87 @@ def get_hazard_info(lat, lon):
     
     return hazard_info
 
+
+def call_llm_api_with_image(image_file, prompt, api_key):
+    """画像ファイルを直接LLM APIに送信して結果を取得"""
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        
+        # 画像ファイルをBase64エンコード
+        image_file.seek(0)  # ファイルポインタを先頭に戻す
+        image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        # ファイルタイプを取得
+        file_type = image_file.type if hasattr(image_file, 'type') else 'image/png'
+        
+        full_prompt = f"""
+アップロードされた画像ファイルを分析してください。
+特に住所情報に注目して分析してください。
+
+ユーザーのプロンプト: {prompt}
+
+住所情報が含まれている場合は、以下の形式で出力してください：
+【住所一覧】
+- 住所1
+- 住所2
+- ...
+
+その他の分析結果も含めて回答してください。
+"""
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "あなたは日本の住所情報の抽出と分析を得意とするAIアシスタントです。画像ファイルの内容を読み取り、分析することができます。"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": full_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{file_type};base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=1500,
+            temperature=0.3
+        )
+        
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"API呼び出しエラー: {str(e)}")
+        return None
+
+def extract_addresses_from_response(response_text):
+    """LLMレスポンスから住所を抽出"""
+    addresses = []
+    lines = response_text.split('\n')
+    in_address_section = False
+    
+    for line in lines:
+        line = line.strip()
+        if '【住所一覧】' in line or '住所一覧' in line:
+            in_address_section = True
+            continue
+        elif line.startswith('【') and line.endswith('】'):
+            in_address_section = False
+            continue
+        elif in_address_section and line.startswith('- '):
+            address = line[2:].strip()
+            if address:
+                addresses.append(address)
+    
+    return addresses
+
+# セッション状態の初期化
+if 'llm_response' not in st.session_state:
+    st.session_state.llm_response = None
+if 'extracted_addresses' not in st.session_state:
+    st.session_state.extracted_addresses = []
+
 # サンプル住所
 sample_addresses = {
     "東京都江東区豊洲3-3-3": "河川に近い地域",
@@ -60,6 +143,91 @@ sample_addresses = {
 if 'search_address' not in st.session_state:
     st.session_state.search_address = None
 
+# 画像アップロードセクション
+st.markdown("---")
+st.subheader("🖼️ 画像分析機能")
+st.markdown("画像ファイルをアップロードして、AI分析により住所情報を抽出します")
+
+with st.container():
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # APIキー入力
+        api_key = st.text_input(
+            "OpenAI APIキー",
+            type="password",
+            placeholder="sk-...",
+            help="OpenAI APIキーを入力してください"
+        )
+    
+    with col2:
+        st.markdown("")  # スペース調整
+
+# 画像アップロードとプロンプト入力
+with st.container():
+    col1, col2 = st.columns([2, 2])
+    
+    with col1:
+        uploaded_file = st.file_uploader(
+            "画像ファイルをアップロード",
+            type=["png", "jpg", "jpeg"],
+            help="分析したい画像ファイルを選択してください"
+        )
+    
+    with col2:
+        prompt = st.text_area(
+            "分析プロンプト",
+            placeholder="例: この文書から住所情報を抽出してください",
+            height=100,
+            help="画像に対してどのような分析を行いたいか入力してください"
+        )
+
+# 分析実行ボタン
+if uploaded_file and prompt and api_key:
+    if st.button("🤖 AI分析を実行", type="primary", use_container_width=True):
+        with st.spinner("画像を分析中..."):
+            # 画像ファイルを直接LLM APIに送信
+            llm_response = call_llm_api_with_image(uploaded_file, prompt, api_key)
+            
+            if llm_response:
+                st.session_state.llm_response = llm_response
+                st.session_state.extracted_addresses = extract_addresses_from_response(llm_response)
+
+# LLM分析結果の表示
+if st.session_state.llm_response:
+    st.markdown("---")
+    st.subheader("🤖 AI分析結果")
+    
+    # 分析結果を表示
+    with st.expander("📋 完全な分析結果", expanded=False):
+        st.markdown(st.session_state.llm_response)
+    
+    # 抽出された住所を表示
+    if st.session_state.extracted_addresses:
+        st.markdown("### 📍 抽出された住所")
+        
+        # 住所をボタンで表示（クリックでカスタム住所欄に入力）
+        address_cols = st.columns(min(3, len(st.session_state.extracted_addresses)))
+        for idx, address in enumerate(st.session_state.extracted_addresses):
+            col_idx = idx % len(address_cols)
+            with address_cols[col_idx]:
+                if st.button(
+                    f"📍 {address}",
+                    key=f"extracted_address_{idx}",
+                    use_container_width=True,
+                    help="クリックしてカスタム住所欄に入力"
+                ):
+                    st.session_state.search_address = address
+                    st.session_state.selected_extracted = address
+                    st.success(f"住所を設定しました: {address}")
+                    st.rerun()
+    
+    # 結果をクリアするボタン
+    if st.button("🗑️ 分析結果をクリア", type="secondary"):
+        st.session_state.llm_response = None
+        st.session_state.extracted_addresses = []
+        st.rerun()
+
 # UIコンテナ
 with st.container():
     st.subheader("📍 住所を入力")
@@ -68,8 +236,16 @@ with st.container():
     with st.form(key='address_form'):
         col1, col2 = st.columns([4, 1])
         with col1:
+            # 抽出された住所が選択されている場合はデフォルト値として設定
+            default_address = ""
+            if hasattr(st.session_state, 'selected_extracted') and st.session_state.selected_extracted:
+                default_address = st.session_state.selected_extracted
+                # 一度使ったらクリア
+                st.session_state.selected_extracted = None
+            
             custom_address = st.text_input(
                 "住所",
+                value=default_address,
                 placeholder="例: 東京都千代田区丸の内1-1-1",
                 label_visibility="collapsed"
             )
