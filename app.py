@@ -42,14 +42,16 @@ if search_button:
     elif selected_sample != "選択してください":
         st.session_state.search_address = selected_sample
         address = selected_sample
-        st.info(f"選択した地域: {sample_addresses[selected_sample]}")
+        if selected_sample in sample_addresses:
+            st.info(f"選択した地域: {sample_addresses[selected_sample]}")
 
 # サンプル住所が選択された場合（検索ボタンを押さずに選択のみ）
 elif selected_sample != "選択してください" and selected_sample != st.session_state.get('last_selected_sample', ''):
     st.session_state.search_address = selected_sample
     st.session_state.last_selected_sample = selected_sample
     address = selected_sample
-    st.info(f"選択した地域: {sample_addresses[selected_sample]}")
+    if selected_sample in sample_addresses:
+        st.info(f"選択した地域: {sample_addresses[selected_sample]}")
 
 # 前回の検索結果を維持
 elif st.session_state.search_address:
