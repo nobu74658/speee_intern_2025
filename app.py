@@ -6,8 +6,56 @@ from streamlit_folium import st_folium
 st.set_page_config(page_title="ハザードマップ表示", layout="wide")
 st.title("ハザードマップ表示アプリ")
 
-# 住所入力
-address = st.text_input("住所を入力してください", placeholder="例: 東京都千代田区丸の内1-1-1")
+# サンプル住所
+sample_addresses = {
+    "東京都江東区豊洲": "河川に近い地域",
+    "東京都港区海岸": "沿岸部の地域",
+    "東京都世田谷区成城": "内陸の住宅地",
+    "神奈川県鎌倉市由比ガ浜": "海岸沿いの地域",
+    "東京都八王子市高尾町": "山間部の地域"
+}
+
+# セッション状態の初期化
+if 'search_address' not in st.session_state:
+    st.session_state.search_address = None
+
+# 住所入力フォーム
+with st.form(key='address_form'):
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        custom_address = st.text_input("住所を入力してください", placeholder="例: 東京都千代田区丸の内1-1-1")
+    with col2:
+        search_button = st.form_submit_button("検索", type="primary")
+
+# サンプル住所選択
+selected_sample = st.selectbox("またはサンプル住所を選択", ["選択してください"] + list(sample_addresses.keys()), key="sample_select")
+
+# 検索実行の判定
+address = None
+
+# カスタム住所の検索ボタンが押された場合
+if search_button:
+    # カスタム住所が入力されている場合はそちらを優先
+    if custom_address:
+        st.session_state.search_address = custom_address
+        address = custom_address
+    elif selected_sample != "選択してください":
+        st.session_state.search_address = selected_sample
+        address = selected_sample
+        st.info(f"選択した地域: {sample_addresses[selected_sample]}")
+
+# サンプル住所が選択された場合（検索ボタンを押さずに選択のみ）
+elif selected_sample != "選択してください" and selected_sample != st.session_state.get('last_selected_sample', ''):
+    st.session_state.search_address = selected_sample
+    st.session_state.last_selected_sample = selected_sample
+    address = selected_sample
+    st.info(f"選択した地域: {sample_addresses[selected_sample]}")
+
+# 前回の検索結果を維持
+elif st.session_state.search_address:
+    address = st.session_state.search_address
+    if address in sample_addresses and address == st.session_state.get('last_selected_sample', ''):
+        st.info(f"選択した地域: {sample_addresses[address]}")
 
 if address:
     # 住所から緯度経度を取得（国土地理院ジオコーディングAPI）
