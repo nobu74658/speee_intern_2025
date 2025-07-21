@@ -3,7 +3,7 @@ import requests
 import folium
 from streamlit_folium import st_folium
 from typing import Literal
-from openai import OpenAI
+import openai
 import base64
 import os
 
@@ -70,9 +70,10 @@ check_proxy_settings()
 
 def call_llm_api_with_image(image_file, prompt, api_key):
     """画像ファイルを直接LLM APIに送信して結果を取得"""
+    st.write(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     check_proxy_settings()
     try:
-        client = OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=api_key)
         
         # 画像ファイルをBase64エンコード
         image_file.seek(0)  # ファイルポインタを先頭に戻す
