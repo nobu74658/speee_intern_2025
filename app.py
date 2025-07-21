@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 from typing import Literal
 from openai import OpenAI
 import base64
+import os
 
 st.set_page_config(page_title="ハザードマップ表示", layout="wide", page_icon="🗾")
 st.title("🗾 ハザードマップ表示アプリ")
@@ -49,9 +50,27 @@ def get_hazard_info(lat, lon):
     
     return hazard_info
 
+def check_proxy_settings():
+    proxy_keys = [
+        "http_proxy", "https_proxy",
+        "HTTP_PROXY", "HTTPS_PROXY"
+    ]
+    
+    found = False
+    for key in proxy_keys:
+        value = os.environ.get(key)
+        if value:
+            st.write(f"⚠️ `{key}` が設定されています: `{value}`")
+            found = True
+    
+    if not found:
+        st.success("プロキシ環境変数は設定されていません。")
+
+check_proxy_settings()
 
 def call_llm_api_with_image(image_file, prompt, api_key):
     """画像ファイルを直接LLM APIに送信して結果を取得"""
+    check_proxy_settings()
     try:
         client = OpenAI(api_key=api_key)
         
