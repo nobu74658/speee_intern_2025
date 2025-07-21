@@ -51,31 +51,10 @@ def get_hazard_info(lat, lon):
     
     return hazard_info
 
-def check_proxy_settings():
-    proxy_keys = [
-        "http_proxy", "https_proxy",
-        "HTTP_PROXY", "HTTPS_PROXY"
-    ]
-    
-    found = False
-    for key in proxy_keys:
-        value = os.environ.get(key)
-        if value:
-            st.write(f"⚠️ `{key}` が設定されています: `{value}`")
-            found = True
-    
-    if not found:
-        st.success("プロキシ環境変数は設定されていません。")
-
-check_proxy_settings()
-
 def call_llm_api_with_image(image_file, api_key):
     """画像ファイルを直接LLM APIに送信して結果を取得"""
-    st.write(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
-    check_proxy_settings()
-    print(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     try:
         openai.api_key = api_key
         
@@ -191,32 +170,76 @@ def call_llm_api_with_image(image_file, api_key):
         st.error(f"API呼び出しエラー: {str(e)}")
         return None
 
-def extract_addresses_from_response(response_text):
-    """LLMレスポンスから住所を抽出"""
+def extract_data_from_response(response_text):
+    """LLMレスポンスから住所と土地情報を抽出"""
     addresses = []
-    lines = response_text.split('\n')
-    in_address_section = False
+    land_info = None
     
-    for line in lines:
-        line = line.strip()
-        if '【住所一覧】' in line or '住所一覧' in line:
-            in_address_section = True
-            continue
-        elif line.startswith('【') and line.endswith('】'):
-            in_address_section = False
-            continue
-        elif in_address_section and line.startswith('- '):
-            address = line[2:].strip()
-            if address:
-                addresses.append(address)
+    try:
+        # JSONとして解析を試みる
+        import json
+        data = json.loads(response_text)
+        
+        # land_information全体を保存
+        if 'land_information' in data:
+            land_info = data['land_information']
+            
+            # 土地の所在地を抽出
+            if 'location' in land_info:
+                location = land_info['location']
+                if location and location not in addresses:
+                    addresses.append(location)
+            
+            # 所有者住所を抽出
+            if 'owner' in land_info and 'address' in land_info['owner']:
+                owner_address = land_info['owner']['address']
+                if owner_address and owner_address not in addresses:
+                    addresses.append(owner_address)
+        
+        # 権利部A（所有権）から住所を抽出
+        if 'rights_section_A_ownership' in data:
+            for item in data['rights_section_A_ownership']:
+                if 'rights_holder_and_other_matters' in item and 'owner_address' in item['rights_holder_and_other_matters']:
+                    addr = item['rights_holder_and_other_matters']['owner_address']
+                    if addr and addr not in addresses:
+                        addresses.append(addr)
+        
+        # 権利部B（その他の権利）から住所を抽出
+        if 'rights_section_B_other_rights' in data:
+            for item in data['rights_section_B_other_rights']:
+                if 'rights_holder_and_other_matters' in item:
+                    matters = item['rights_holder_and_other_matters']
+                    # 債務者住所
+                    if 'debtor' in matters and 'address' in matters['debtor']:
+                        addr = matters['debtor']['address']
+                        if addr and addr not in addresses:
+                            addresses.append(addr)
+                    # 抵当権者住所
+                    if 'mortgage_holder' in matters and 'address' in matters['mortgage_holder']:
+                        addr = matters['mortgage_holder']['address']
+                        if addr and addr not in addresses:
+                            addresses.append(addr)
     
-    return addresses
+    except json.JSONDecodeError:
+        # JSON解析に失敗した場合は、従来の方法で抽出を試みる
+        lines = response_text.split('\n')
+        for line in lines:
+            line = line.strip()
+            # 日本の住所パターンを探す（都道府県から始まる）
+            if any(pref in line for pref in ['東京都', '大阪府', '京都府', '北海道'] + [f'{p}県' for p in ['青森', '岩手', '宮城', '秋田', '山形', '福島', '茨城', '栃木', '群馬', '埼玉', '千葉', '神奈川', '新潟', '富山', '石川', '福井', '山梨', '長野', '岐阜', '静岡', '愛知', '三重', '滋賀', '兵庫', '奈良', '和歌山', '鳥取', '島根', '岡山', '広島', '山口', '徳島', '香川', '愛媛', '高知', '福岡', '佐賀', '長崎', '熊本', '大分', '宮崎', '鹿児島', '沖縄']]):
+                # 住所として抽出
+                if line not in addresses and len(line) > 5:  # 最低限の長さチェック
+                    addresses.append(line)
+    
+    return addresses, land_info
 
 # セッション状態の初期化
 if 'llm_response' not in st.session_state:
     st.session_state.llm_response = None
 if 'extracted_addresses' not in st.session_state:
     st.session_state.extracted_addresses = []
+if 'land_information' not in st.session_state:
+    st.session_state.land_information = None
 
 # サンプル住所
 sample_addresses = {
@@ -259,7 +282,9 @@ if uploaded_file:
                 
                 if llm_response:
                     st.session_state.llm_response = llm_response
-                    st.session_state.extracted_addresses = extract_addresses_from_response(llm_response)
+                    addresses, land_info = extract_data_from_response(llm_response)
+                    st.session_state.extracted_addresses = addresses
+                    st.session_state.land_information = land_info
     else:
         st.error("⚠️ OPENAI_API_KEY環境変数が設定されていません")
 
@@ -271,6 +296,86 @@ if st.session_state.llm_response:
     # 分析結果を表示
     with st.expander("📋 完全な分析結果", expanded=False):
         st.markdown(st.session_state.llm_response)
+    
+    # 土地情報を表示
+    if st.session_state.land_information:
+        st.markdown("### 📄 土地情報")
+        
+        land_info = st.session_state.land_information
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**基本情報**")
+            if 'real_estate_number' in land_info and land_info['real_estate_number']:
+                st.write(f"• 不動産番号: {land_info['real_estate_number']}")
+            
+            # 所在地をクリック可能にする
+            if 'location' in land_info and land_info['location']:
+                location_col1, location_col2 = st.columns([1, 3])
+                with location_col1:
+                    st.write("• 所在:")
+                with location_col2:
+                    if st.button(
+                        f"📍 {land_info['location']}", 
+                        key="land_location_btn",
+                        use_container_width=True,
+                        help="クリックして住所として使用"
+                    ):
+                        st.session_state.search_address = land_info['location']
+                        st.session_state.selected_extracted = land_info['location']
+                        st.success(f"住所を設定しました: {land_info['location']}")
+                        st.rerun()
+            
+            if 'lot_number' in land_info and land_info['lot_number']:
+                st.write(f"• 地番: {land_info['lot_number']}")
+            
+            # 所在地と地番を組み合わせた完全な住所を提供
+            if 'location' in land_info and land_info['location'] and 'lot_number' in land_info and land_info['lot_number']:
+                full_address = f"{land_info['location']}{land_info['lot_number']}"
+                if st.button(
+                    f"📍 {full_address} (所在+地番)", 
+                    key="full_address_btn",
+                    use_container_width=True,
+                    help="所在地と地番を組み合わせた住所を使用"
+                ):
+                    st.session_state.search_address = full_address
+                    st.session_state.selected_extracted = full_address
+                    st.success(f"住所を設定しました: {full_address}")
+                    st.rerun()
+            if 'land_category' in land_info and land_info['land_category']:
+                st.write(f"• 地目: {land_info['land_category']}")
+            if 'land_area_sqm' in land_info and land_info['land_area_sqm']:
+                st.write(f"• 地積: {land_info['land_area_sqm']}")
+        
+        with col2:
+            st.markdown("**所有者情報**")
+            if 'owner' in land_info:
+                if 'name' in land_info['owner'] and land_info['owner']['name']:
+                    st.write(f"• 所有者名: {land_info['owner']['name']}")
+                
+                # 所有者住所をクリック可能にする
+                if 'address' in land_info['owner'] and land_info['owner']['address']:
+                    owner_col1, owner_col2 = st.columns([1, 3])
+                    with owner_col1:
+                        st.write("• 所有者住所:")
+                    with owner_col2:
+                        if st.button(
+                            f"📍 {land_info['owner']['address']}", 
+                            key="owner_address_btn",
+                            use_container_width=True,
+                            help="クリックして住所として使用"
+                        ):
+                            st.session_state.search_address = land_info['owner']['address']
+                            st.session_state.selected_extracted = land_info['owner']['address']
+                            st.success(f"住所を設定しました: {land_info['owner']['address']}")
+                            st.rerun()
+            
+            if 'cause_and_date' in land_info:
+                st.markdown("**原因・日付**")
+                if 'cause' in land_info['cause_and_date'] and land_info['cause_and_date']['cause']:
+                    st.write(f"• 原因: {land_info['cause_and_date']['cause']}")
+                if 'registration_date' in land_info['cause_and_date'] and land_info['cause_and_date']['registration_date']:
+                    st.write(f"• 登記日付: {land_info['cause_and_date']['registration_date']}")
     
     # 抽出された住所を表示
     if st.session_state.extracted_addresses:
@@ -296,6 +401,7 @@ if st.session_state.llm_response:
     if st.button("🗑️ 分析結果をクリア", type="secondary"):
         st.session_state.llm_response = None
         st.session_state.extracted_addresses = []
+        st.session_state.land_information = None
         st.rerun()
 
 # UIコンテナ
