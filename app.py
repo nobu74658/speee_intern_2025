@@ -72,6 +72,7 @@ def call_llm_api_with_image(image_file, prompt, api_key):
     """画像ファイルを直接LLM APIに送信して結果を取得"""
     st.write(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     check_proxy_settings()
+    print(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     try:
         client = openai.OpenAI(api_key=api_key)
         
