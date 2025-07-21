@@ -74,7 +74,8 @@ def call_llm_api_with_image(image_file, prompt, api_key):
     check_proxy_settings()
     print(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     try:
-        client = openai.OpenAI(api_key=api_key)
+        # client = openai.OpenAI(api_key=api_key)
+        openai.api_key = api_key
         
         # 画像ファイルをBase64エンコード
         image_file.seek(0)  # ファイルポインタを先頭に戻す
@@ -98,7 +99,7 @@ def call_llm_api_with_image(image_file, prompt, api_key):
 その他の分析結果も含めて回答してください。
 """
         
-        response = client.chat.completions.create(
+        response = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "あなたは日本の住所情報の抽出と分析を得意とするAIアシスタントです。画像ファイルの内容を読み取り、分析することができます。"},
