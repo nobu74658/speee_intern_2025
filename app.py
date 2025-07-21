@@ -3,7 +3,7 @@ import requests
 import folium
 from streamlit_folium import st_folium
 from typing import Literal
-import openai
+from openai import OpenAI
 import base64
 
 st.set_page_config(page_title="ハザードマップ表示", layout="wide", page_icon="🗾")
@@ -53,7 +53,7 @@ def get_hazard_info(lat, lon):
 def call_llm_api_with_image(image_file, prompt, api_key):
     """画像ファイルを直接LLM APIに送信して結果を取得"""
     try:
-        client = openai.OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key)
         
         # 画像ファイルをBase64エンコード
         image_file.seek(0)  # ファイルポインタを先頭に戻す
