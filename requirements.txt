@@ -3,3 +3,4 @@ folium==0.16.0
 streamlit-folium==0.18.0
 requests==2.31.0
 openai==1.97.0
+dotenv==0.9.9

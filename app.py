@@ -6,6 +6,7 @@ from typing import Literal
 import openai
 import base64
 import os
+from dotenv import load_dotenv
 
 st.set_page_config(page_title="ハザードマップ表示", layout="wide", page_icon="🗾")
 st.title("🗾 ハザードマップ表示アプリ")
@@ -68,13 +69,14 @@ def check_proxy_settings():
 
 check_proxy_settings()
 
-def call_llm_api_with_image(image_file, prompt, api_key):
+def call_llm_api_with_image(image_file, api_key):
     """画像ファイルを直接LLM APIに送信して結果を取得"""
     st.write(f"OpenAI ライブラリのバージョン: {openai.__version__}")
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
     check_proxy_settings()
     print(f"OpenAI ライブラリのバージョン: {openai.__version__}")
     try:
-        # client = openai.OpenAI(api_key=api_key)
         openai.api_key = api_key
         
         # 画像ファイルをBase64エンコード
@@ -84,19 +86,83 @@ def call_llm_api_with_image(image_file, prompt, api_key):
         # ファイルタイプを取得
         file_type = image_file.type if hasattr(image_file, 'type') else 'image/png'
         
-        full_prompt = f"""
-アップロードされた画像ファイルを分析してください。
-特に住所情報に注目して分析してください。
-
-ユーザーのプロンプト: {prompt}
-
-住所情報が含まれている場合は、以下の形式で出力してください：
-【住所一覧】
-- 住所1
-- 住所2
-- ...
-
-その他の分析結果も含めて回答してください。
+        full_prompt = """
+{
+ 'request': 'Extract the following information from the provided PDF document into a JSON format:',
+ 'fields': {
+  'document_type': 'The type of the document',
+  'sample_document': "Boolean indicating if it's a sample document ()",
+  'date_of_issue': 'The issue date of the document',
+  'issuing_office': 'The office that issued the document',
+  'registrar': 'The name of the registrar',
+  'management_number': 'The management number',
+  'disclaimer_underline': 'The disclaimer regarding underlined items',
+  'land_information': {
+   'real_estate_number': '不動産番号',
+   'location': '所在',
+   'lot_number': '地番',
+   'land_category': '地目',
+   'land_area_sqm': '地積 (m²)',
+   'cause_and_date': {
+    'cause': '原因',
+    'registration_date': '登記の日付'
+   },
+   'owner': {
+    'address': '所有者住所',
+    'name': '所有者名'
+   }
+  },
+  'rights_section_A_ownership': [
+   {
+    'sequence_number': '順位番号',
+    'purpose_of_registration': '登記の目的',
+    'reception_date_and_number': '受付年月日・受付番号',
+    'rights_holder_and_other_matters': {
+     'owner_address': '所有者住所',
+     'owner_name': '所有者名',
+     'cause': '原因',
+     'is_erased': '抹消事項であるか (boolean, 下線があればtrue)'
+    }
+   }
+  ],
+  'rights_section_B_other_rights': [
+   {
+    'sequence_number': '順位番号',
+    'purpose_of_registration': '登記の目的',
+    'reception_date_and_number': '受付年月日・受付番号',
+    'rights_holder_and_other_matters': {
+     'cause': '原因',
+     'debt_amount_yen': '債権額 (円)',
+     'interest_rate_annual_percent': '利息 (年率%)',
+     'damages_rate_annual_percent': '損害金 (年率%)',
+     'debtor': {
+      'address': '債務者住所',
+      'name': '債務者名'
+     },
+     'mortgage_holder': {
+      'address': '抵当権者住所',
+      'name': '抵当権者名',
+      'branch_name': '取扱店'
+     },
+     'joint_collateral_catalog_number': '共同担保目録番号',
+     'is_erased': '抹消事項であるか (boolean, 下線があればtrue)'
+    }
+   }
+  ],
+  'joint_collateral_catalog': {
+   'catalog_number': '共同担保目録の番号',
+   'prepared_date': '調製日',
+   'items': [
+    {
+     'number': '番号',
+     'description_of_right': '担保の目的である権利の表示',
+     'sequence_number': '順位番号',
+     'is_erased': '抹消事項であるか (boolean, 下線があればtrue)'
+    }
+   ]
+  }
+ }
+}
 """
         
         response = openai.chat.completions.create(
@@ -170,50 +236,32 @@ st.markdown("---")
 st.subheader("🖼️ 画像分析機能")
 st.markdown("画像ファイルをアップロードして、AI分析により住所情報を抽出します")
 
-with st.container():
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # APIキー入力
-        api_key = st.text_input(
-            "OpenAI APIキー",
-            type="password",
-            placeholder="sk-...",
-            help="OpenAI APIキーを入力してください"
-        )
-    
-    with col2:
-        st.markdown("")  # スペース調整
 
-# 画像アップロードとプロンプト入力
+# 画像アップロード
 with st.container():
-    col1, col2 = st.columns([2, 2])
-    
-    with col1:
-        uploaded_file = st.file_uploader(
-            "画像ファイルをアップロード",
-            type=["png", "jpg", "jpeg"],
-            help="分析したい画像ファイルを選択してください"
-        )
-    
-    with col2:
-        prompt = st.text_area(
-            "分析プロンプト",
-            placeholder="例: この文書から住所情報を抽出してください",
-            height=100,
-            help="画像に対してどのような分析を行いたいか入力してください"
-        )
+    uploaded_file = st.file_uploader(
+        "画像ファイルをアップロード",
+        type=["png", "jpg", "jpeg"],
+        help="分析したい画像ファイルを選択してください"
+    )
 
 # 分析実行ボタン
-if uploaded_file and prompt and api_key:
-    if st.button("🤖 AI分析を実行", type="primary", use_container_width=True):
-        with st.spinner("画像を分析中..."):
-            # 画像ファイルを直接LLM APIに送信
-            llm_response = call_llm_api_with_image(uploaded_file, prompt, api_key)
-            
-            if llm_response:
-                st.session_state.llm_response = llm_response
-                st.session_state.extracted_addresses = extract_addresses_from_response(llm_response)
+if uploaded_file:
+    # 環境変数からAPIキーを取得
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
+    
+    if api_key:
+        if st.button("🤖 AI分析を実行", type="primary", use_container_width=True):
+            with st.spinner("画像を分析中..."):
+                # 画像ファイルを直接LLM APIに送信
+                llm_response = call_llm_api_with_image(uploaded_file, api_key)
+                
+                if llm_response:
+                    st.session_state.llm_response = llm_response
+                    st.session_state.extracted_addresses = extract_addresses_from_response(llm_response)
+    else:
+        st.error("⚠️ OPENAI_API_KEY環境変数が設定されていません")
 
 # LLM分析結果の表示
 if st.session_state.llm_response:
